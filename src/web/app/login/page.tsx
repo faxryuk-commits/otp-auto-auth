@@ -25,6 +25,7 @@ export default function LoginPage() {
 
   const [tgLoading, setTgLoading] = useState(false);
   const [tgError, setTgError] = useState<string | null>(null);
+  const [tgPhone, setTgPhone] = useState('');
 
   const [phone, setPhone] = useState('+971');
   const [consent, setConsent] = useState(false);
@@ -65,12 +66,22 @@ export default function LoginPage() {
       setTgLoading(true);
       setTgError(null);
       try {
+        const normalizedPhone = tgPhone ? formatPhone(tgPhone) : null;
+        if (tgPhone && !normalizedPhone) {
+          setTgError('Укажите корректный номер телефона в формате +XXXXXXXXXXX.');
+          return;
+        }
+
         const response = await fetch('/api/auth/tg-login', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(
+            normalizedPhone
+              ? { ...payload, phone: normalizedPhone }
+              : payload,
+          ),
         });
 
         if (!response.ok) {
@@ -87,7 +98,7 @@ export default function LoginPage() {
         setTgLoading(false);
       }
     },
-    [router],
+    [router, tgPhone],
   );
 
   const submitPhone = async (event: FormEvent<HTMLFormElement>) => {
@@ -197,6 +208,15 @@ export default function LoginPage() {
     setOtp(onlyDigits);
   };
 
+  const onTgPhoneChange = (value: string) => {
+    const sanitized = value.replace(/[^\d+]/g, '');
+    if (!sanitized.startsWith('+')) {
+      setTgPhone(`+${sanitized.replace(/\+/g, '')}`);
+    } else {
+      setTgPhone(`+${sanitized.slice(1).replace(/\+/g, '')}`);
+    }
+  };
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 py-12 px-4">
       <div className="w-full max-w-2xl rounded-3xl bg-white p-10 shadow-xl">
@@ -244,7 +264,22 @@ export default function LoginPage() {
                 Мы не запрашиваем ваш номер телефона. Telegram подтверждает вашу личность
                 автоматически.
               </p>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-6">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">
+                    Номер телефона (по желанию)
+                  </label>
+                  <input
+                    type="tel"
+                    value={tgPhone}
+                    onChange={(event) => onTgPhoneChange(event.target.value)}
+                    placeholder="+9715XXXXXXXX"
+                    className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-3 text-base shadow-sm focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/20"
+                  />
+                  <p className="mt-1 text-xs text-slate-400">
+                    Укажите номер, чтобы мы могли связаться с вами позже. Поле необязательное.
+                  </p>
+                </div>
                 {clientConfig.telegramBotName ? (
                   <TelegramLoginButton
                     botName={clientConfig.telegramBotName}
