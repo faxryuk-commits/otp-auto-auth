@@ -128,7 +128,10 @@ export default function LoginPage() {
         if (!response.ok) return;
         const data = (await response.json()) as { state: string; phone?: string };
         if (data.phone) {
-          setTgPhone((prev) => (prev && prev !== '+971' ? prev : data.phone));
+          setTgPhone((prev) => {
+            if (prev && prev !== '+971') return prev;
+            return sanitizePhoneInput(data.phone ?? prev);
+          });
           setTgStatusHint('Мы получили ваш номер. Введите код из Telegram.');
         }
         if (data.state === 'expired') {
@@ -178,14 +181,12 @@ export default function LoginPage() {
         body: JSON.stringify({ phone: normalizedPhone }),
       });
 
-      const data = (await response.json().catch(() => ({}))) as
-        | { session_id: string; bot_link: string; expires_in: number }
-        | ErrorResponse;
-
-      if (!response.ok || 'error' in data) {
-        setTgError(mapErrorCode((data as ErrorResponse).error));
+      const raw = await response.json().catch(() => ({}));
+      if (!response.ok || isErrorResponse(raw)) {
+        setTgError(mapErrorCode(raw.error));
         return;
       }
+      const data = raw as { session_id: string; bot_link: string; expires_in: number };
 
       setTgSessionId(data.session_id);
       setTgBotLink(data.bot_link);
@@ -231,9 +232,9 @@ export default function LoginPage() {
         body: JSON.stringify(payload),
       });
 
-      const data = (await response.json().catch(() => ({}))) as ErrorResponse;
-      if (!response.ok) {
-        setTgError(mapErrorCode(data.error));
+      const raw = await response.json().catch(() => ({}));
+      if (!response.ok || isErrorResponse(raw)) {
+        setTgError(mapErrorCode((raw as ErrorResponse).error));
         return;
       }
 
@@ -270,14 +271,12 @@ export default function LoginPage() {
         body: JSON.stringify({ phone: normalizedPhone }),
       });
 
-      const data = (await response.json().catch(() => ({}))) as
-        | { session_id: string; expires_in: number }
-        | ErrorResponse;
-
-      if (!response.ok || !('session_id' in data)) {
-        setWaError(mapErrorCode((data as ErrorResponse)?.error));
+      const raw = await response.json().catch(() => ({}));
+      if (!response.ok || isErrorResponse(raw)) {
+        setWaError(mapErrorCode((raw as ErrorResponse)?.error));
         return;
       }
+      const data = raw as { session_id: string; expires_in: number };
 
       setSessionId(data.session_id);
       setExpiresAt(Date.now() + data.expires_in * 1000);
@@ -316,9 +315,9 @@ export default function LoginPage() {
         body: JSON.stringify({ phone: normalizedPhone, otp }),
       });
 
-      const data = (await response.json().catch(() => ({}))) as ErrorResponse;
-      if (!response.ok) {
-        setWaError(mapErrorCode(data.error));
+      const raw = await response.json().catch(() => ({}));
+      if (!response.ok || isErrorResponse(raw)) {
+        setWaError(mapErrorCode((raw as ErrorResponse).error));
         return;
       }
 
@@ -642,4 +641,8 @@ function mapErrorCode(code?: string) {
     default:
       return 'Произошла ошибка. Попробуйте ещё раз.';
   }
+}
+
+function isErrorResponse(value: unknown): value is ErrorResponse {
+  return typeof value === 'object' && value !== null && 'error' in value;
 }
