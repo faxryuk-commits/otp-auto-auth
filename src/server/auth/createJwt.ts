@@ -1,4 +1,4 @@
-import jwt, { Secret, SignOptions } from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
 import { cookies } from 'next/headers';
 import { getConfig } from '../config';
 
@@ -12,15 +12,11 @@ export async function createJwt(
   options?: { setCookie?: boolean },
 ): Promise<string> {
   const config = getConfig();
-  const secret: Secret = config.JWT_SECRET;
-  const ttlSeconds = parseJwtTtl(config.JWT_TTL ?? '7d');
-  const signOptions: SignOptions = {
+  const token = jwt.sign(payload, config.JWT_SECRET, {
     issuer: config.API_URL ?? 'auth-service',
     audience: config.APP_URL ?? 'app',
-    expiresIn: ttlSeconds,
-  };
-
-  const token = jwt.sign(payload, secret, signOptions);
+    expiresIn: config.JWT_TTL ?? '7d',
+  });
 
   if (options?.setCookie) {
     const cookieStore = await cookies();
@@ -28,7 +24,7 @@ export async function createJwt(
       httpOnly: true,
       sameSite: 'lax',
       secure: config.NODE_ENV === 'production',
-      maxAge: ttlSeconds,
+      maxAge: parseJwtTtl(config.JWT_TTL ?? '7d'),
       path: '/',
     });
   }

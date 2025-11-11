@@ -1,97 +1,36 @@
-# OTP Auto Auth
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-Модуль авторизации для MVP веб-приложения с двумя каналами входа:
+## Getting Started
 
-- Telegram Login Widget (SSO без OTP)
-- WhatsApp OTP через Cloud API Meta
-
-Репозиторий содержит бэкенд (Next.js Route Handlers, Prisma) и фронтенд (/login) с переключаемыми вкладками.
-
-## Стек
-
-- Next.js 16 (App Router, TypeScript)
-- Prisma ORM + PostgreSQL
-- JWT (подпись на сервере, cookie HttpOnly)
-- Tailwind CSS 4 для UI
-
-## Структура проекта
-
-```
-app/
-  prisma/
-    schema.prisma
-  src/
-    server/           # серверная логика, Prisma, конфиги
-    web/              # UI и клиентские компоненты
-    app/              # Next.js маршруты (API + /login)
-  tests/
-    e2e/
-      auth_wa_otp.spec.ts
-      auth_tg_sso.spec.ts
-```
-
-## Подготовка окружения
-
-1. Установите зависимости:
-
-   ```bash
-   npm install
-   ```
-
-2. Создайте `.env` на основе `.env.example` и заполните секреты:
-
-   - `DATABASE_URL` — строка подключения PostgreSQL
-   - `JWT_SECRET` — длинный секрет (≥32 символов)
-   - `TG_*` — параметры Telegram бота
-   - `WA_*` — токен и шаблон WhatsApp Cloud API
-   - `NEXT_PUBLIC_*` — значения, доступные на клиенте (бот, URL)
-
-3. Настройте Prisma:
-
-   ```bash
-   npx prisma db push   # или prisma migrate dev
-   npx prisma generate
-   ```
-
-## Запуск
+First, run the development server:
 
 ```bash
-npm run dev      # http://localhost:3000
-npm run build
-npm run start
+npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
 ```
 
-## API эндпойнты
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-| Метод | Путь                 | Назначение                    |
-|-------|----------------------|-------------------------------|
-| POST  | `/api/auth/tg-login` | Вход по Telegram SSO          |
-| POST  | `/api/auth/request`  | Запрос OTP (WhatsApp)         |
-| POST  | `/api/auth/verify`   | Подтверждение OTP             |
-| GET   | `/api/auth/status`   | Проверка статуса сессии OTP   |
-| POST  | `/api/tg/webhook`    | Заглушка вебхука Telegram     |
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
-Ответы соответствуют ТЗ (поле `error` с кодами `invalid_signature`, `expired`, `invalid_otp` и т.д.).
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
-## Логика
+## Learn More
 
-- Telegram: проверка подписи HMAC, TTL ≤ 60 секунд, валидация `origin`, создания пользователя и JWT cookie.
-- WhatsApp: генерация 6-значного OTP, шифрование Argon2, сессии `AuthSession`, лимиты попыток (≤5), rate-limit 5/номер и 10/IP в час.
-- Ошибки отправки WhatsApp логируются в `AuditLog` и `console` (Sentry — TODO).
-- Все логины пишутся в `LoginEvent` (канал, IP, user-agent).
+To learn more about Next.js, take a look at the following resources:
 
-### Переключение провайдеров
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
 
-Задайте `AUTH_PROVIDERS` (сервер) и `NEXT_PUBLIC_AUTH_PROVIDERS` (клиент) списком через запятую (`tg`, `wa`), чтобы включать/выключать каналы.
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-## Тесты
+## Deploy on Vercel
 
-Папка `tests/e2e` содержит заготовки сценариев (Playwright/Cypress). Для запуска заполните инструментарий под выбранный раннер.
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
-Юнит-тесты для верификации подписи Telegram и OTP можно добавлять, подключив Jest/Vitest по необходимости.
-
-## Деплой
-
-- Railway/Vercel: настройте переменные окружения и подключение к PostgreSQL.
-- Миграции: `npx prisma migrate deploy` на этапе запуска.
-- Убедитесь, что домены Telegram (`TG_ALLOWED_ORIGIN`) и API совпадают с прод-конфигурацией.
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.

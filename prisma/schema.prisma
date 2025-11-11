@@ -14,7 +14,6 @@ model User {
   updatedAt      DateTime  @updatedAt
   telegramUserId String?   @unique
   waPhone        String?   @unique
-  phone          String?
   name           String?
   username       String?
   sessions       AuthSession[]
@@ -22,19 +21,19 @@ model User {
 }
 
 model AuthSession {
-  id        String    @id @default(cuid())
-  createdAt DateTime  @default(now())
-  expiresAt DateTime
-  channel   String
-  phone     String?
-  tokenHash String?
-  state     String
-  attempts  Int       @default(0)
-  userId    String?
-  user      User?     @relation(fields: [userId], references: [id])
-  sessionToken   String?  @unique
+  id             String    @id @default(cuid())
+  createdAt      DateTime  @default(now())
+  expiresAt      DateTime
+  channel        String
+  phone          String?
+  tokenHash      String?
+  state          String
+  attempts       Int       @default(0)
+  sessionToken   String?   @unique
   telegramChatId String?
   telegramUserId String?
+  userId         String?
+  user           User?     @relation(fields: [userId], references: [id])
 }
 
 model LoginEvent {

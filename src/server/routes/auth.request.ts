@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { z } from 'zod';
 import { prisma } from '../db';
 import { hashToken } from '../auth/hash';
@@ -5,7 +6,6 @@ import { sendOtp } from '../whatsapp/sendOtp';
 import { HttpError } from './httpError';
 import { checkRateLimit } from '../auth/rateLimit';
 import { getConfig } from '../config';
-import { generateOtp, OTP_TTL_SECONDS } from '../auth/otp';
 
 const requestSchema = z.object({
   phone: z
@@ -18,6 +18,8 @@ interface RequestOtpParams {
   ip?: string | null;
   userAgent?: string | null;
 }
+
+const OTP_TTL_SECONDS = 5 * 60;
 
 export async function handleAuthRequest({
   body,
@@ -76,6 +78,10 @@ export async function handleAuthRequest({
     session_id: session.id,
     expires_in: OTP_TTL_SECONDS,
   };
+}
+
+function generateOtp(): string {
+  return crypto.randomInt(0, 1_000_000).toString().padStart(6, '0');
 }
 
 function ensureProviderEnabled(provider: 'tg' | 'wa') {

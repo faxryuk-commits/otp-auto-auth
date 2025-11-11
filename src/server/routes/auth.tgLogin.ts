@@ -15,10 +15,6 @@ const telegramLoginSchema = z.object({
   username: z.string().optional(),
   auth_date: z.number(),
   hash: z.string(),
-  phone: z
-    .string()
-    .regex(/^\+\d{8,15}$/)
-    .optional(),
 });
 
 interface TgLoginParams {
@@ -46,8 +42,7 @@ export async function handleTelegramLogin({
     throw new HttpError(400, 'invalid_signature');
   }
 
-  const { phone, ...telegramData } = parsed.data;
-  const payload = telegramData as TelegramLoginPayload;
+  const payload = parsed.data as TelegramLoginPayload;
   const secret = config.TG_BOT_SECRET ?? config.TG_BOT_TOKEN;
   if (!secret) {
     throw new HttpError(500, 'server_error', 'Telegram secret не задан');
@@ -65,7 +60,6 @@ export async function handleTelegramLogin({
         ? [payload.first_name, payload.last_name ?? ''].join(' ').trim()
         : undefined,
       username: payload.username ?? undefined,
-      phone: phone ?? undefined,
     },
     create: {
       telegramUserId: String(payload.id),
@@ -73,7 +67,6 @@ export async function handleTelegramLogin({
         ? [payload.first_name, payload.last_name ?? ''].join(' ').trim()
         : undefined,
       username: payload.username ?? undefined,
-      phone: phone ?? undefined,
     },
   });
 
@@ -95,7 +88,6 @@ export async function handleTelegramLogin({
       telegramUserId: user.telegramUserId,
       name: user.name,
       username: user.username,
-      phone: user.phone,
     },
   };
 }
