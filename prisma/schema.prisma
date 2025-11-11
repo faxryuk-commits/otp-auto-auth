@@ -32,6 +32,9 @@ model AuthSession {
   attempts  Int       @default(0)
   userId    String?
   user      User?     @relation(fields: [userId], references: [id])
+  sessionToken   String?  @unique
+  telegramChatId String?
+  telegramUserId String?
 }
 
 model LoginEvent {

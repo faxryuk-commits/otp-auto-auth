@@ -22,7 +22,7 @@ const configSchema = z.object({
     .string()
     .optional()
     .transform((value) =>
-      value ? value.split(',').map((v) => v.trim()) : ['tg', 'wa'],
+      value ? value.split(',').map((v) => v.trim()) : ['tg', 'wa', 'tg-otp'],
     ),
   RATE_LIMIT_PHONE_HOURLY: z.coerce.number().default(5),
   RATE_LIMIT_IP_HOURLY: z.coerce.number().default(10),

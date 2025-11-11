@@ -6,8 +6,10 @@ import { createJwt } from '../auth/createJwt';
 import { getConfig } from '../config';
 
 const verifySchema = z.object({
-  phone: z.string(),
+  phone: z.string().optional(),
   otp: z.string().length(6),
+  session_id: z.string().optional(),
+  channel: z.enum(['wa', 'tg-otp']).default('wa'),
 });
 
 interface VerifyParams {
@@ -17,19 +19,24 @@ interface VerifyParams {
 }
 
 export async function handleAuthVerify({ body, ip, userAgent }: VerifyParams) {
-  ensureProviderEnabled('wa');
   const parsed = verifySchema.safeParse(body);
   if (!parsed.success) {
     throw new HttpError(400, 'invalid_otp');
   }
 
-  const { phone, otp } = parsed.data;
+  const { phone, otp, session_id, channel } = parsed.data;
+  ensureProviderEnabled(channel);
+
+  if (!phone && !session_id) {
+    throw new HttpError(400, 'not_found');
+  }
 
   const session = await prisma.authSession.findFirst({
     where: {
-      phone,
-      channel: 'wa',
+      channel,
       state: 'pending',
+      ...(phone ? { phone } : {}),
+      ...(session_id ? { id: session_id } : {}),
     },
     orderBy: { createdAt: 'desc' },
   });
@@ -65,15 +72,33 @@ export async function handleAuthVerify({ body, ip, userAgent }: VerifyParams) {
     throw new HttpError(400, 'invalid_otp');
   }
 
-  const user = await prisma.user.upsert({
-    where: { waPhone: phone },
-    update: {
-      updatedAt: new Date(),
-    },
-    create: {
-      waPhone: phone,
-    },
-  });
+  let user;
+  if (channel === 'wa') {
+    user = await prisma.user.upsert({
+      where: { waPhone: phone ?? session.phone ?? undefined },
+      update: {
+        updatedAt: new Date(),
+      },
+      create: {
+        waPhone: phone ?? session.phone ?? undefined,
+      },
+    });
+  } else {
+    if (!session.telegramUserId) {
+      throw new HttpError(400, 'not_ready');
+    }
+    user = await prisma.user.upsert({
+      where: { telegramUserId: session.telegramUserId },
+      update: {
+        phone: session.phone ?? undefined,
+        updatedAt: new Date(),
+      },
+      create: {
+        telegramUserId: session.telegramUserId,
+        phone: session.phone ?? undefined,
+      },
+    });
+  }
 
   await prisma.authSession.update({
     where: { id: session.id },
@@ -87,26 +112,28 @@ export async function handleAuthVerify({ body, ip, userAgent }: VerifyParams) {
   await prisma.loginEvent.create({
     data: {
       userId: user.id,
-      channel: 'wa',
+      channel: channel === 'wa' ? 'wa' : 'tg',
       ip: ip ?? undefined,
       userAgent: userAgent ?? undefined,
     },
   });
 
-  const token = await createJwt({ sub: user.id, channel: 'wa' }, { setCookie: true });
+  const token = await createJwt({ sub: user.id, channel: channel === 'wa' ? 'wa' : 'tg' }, { setCookie: true });
 
   return {
     token,
     user: {
       id: user.id,
-      waPhone: user.waPhone,
+      waPhone: channel === 'wa' ? user.waPhone : undefined,
+      phone: channel === 'tg-otp' ? user.phone : undefined,
+      telegramUserId: channel === 'tg-otp' ? user.telegramUserId : undefined,
     },
   };
 }
 
-function ensureProviderEnabled(provider: 'tg' | 'wa') {
+function ensureProviderEnabled(channel: 'wa' | 'tg-otp') {
   const config = getConfig();
-  if (!config.AUTH_PROVIDERS.includes(provider)) {
+  if (!config.AUTH_PROVIDERS.includes(channel)) {
     throw new HttpError(404, 'not_found');
   }
 }

@@ -31,8 +31,8 @@ export async function handleAuthStatus(query: Record<string, string | string[] |
       where: { id: session.id },
       data: { state: 'expired' },
     });
-    return { state: 'expired' };
+    return { state: 'expired', channel: session.channel, phone: session.phone ?? undefined };
   }
 
-  return { state: session.state };
+  return { state: session.state, channel: session.channel, phone: session.phone ?? undefined };
 }

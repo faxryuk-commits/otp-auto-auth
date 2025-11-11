@@ -1,31 +1,49 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { TelegramLoginButton } from '@/web/components/TelegramLoginButton';
 import { clientConfig } from '@/web/config/clientConfig';
 
 type Tab = 'tg' | 'wa';
 
+type ProviderConfig = 'tg' | 'wa' | 'tg-otp';
+
 interface ErrorResponse {
   error?: string;
+  phone?: string;
 }
+
+const STORAGE_KEYS = {
+  tgPhone: 'otp-auth:tg-phone',
+  waPhone: 'otp-auth:wa-phone',
+  waConsent: 'otp-auth:wa-consent',
+};
+
+const TELEGRAM_POLL_INTERVAL = 4000;
 
 export default function LoginPage() {
   const router = useRouter();
   const availableTabs = useMemo<Tab[]>(() => {
     const providers = clientConfig.providers.length
       ? clientConfig.providers
-      : (['tg', 'wa'] as Tab[]);
-    const unique = Array.from(new Set(providers));
+      : (['tg', 'wa'] as ProviderConfig[]);
+    const normalized = providers.map((provider) => (provider === 'tg-otp' ? 'tg' : provider));
+    const unique = Array.from(new Set(normalized));
     return unique.filter((tab) => tab === 'tg' || tab === 'wa');
   }, []);
 
   const [activeTab, setActiveTab] = useState<Tab>(availableTabs[0] ?? 'tg');
 
+  const [tgPhone, setTgPhone] = useState('');
+  const [tgSessionId, setTgSessionId] = useState<string | null>(null);
+  const [tgBotLink, setTgBotLink] = useState<string | null>(null);
+  const [tgOtp, setTgOtp] = useState('');
+  const [tgStep, setTgStep] = useState<'intro' | 'verify'>('intro');
   const [tgLoading, setTgLoading] = useState(false);
   const [tgError, setTgError] = useState<string | null>(null);
-  const [tgPhone, setTgPhone] = useState('');
+  const [tgExpiresAt, setTgExpiresAt] = useState<number | null>(null);
+  const [tgTimeLeft, setTgTimeLeft] = useState(0);
+  const [tgStatusHint, setTgStatusHint] = useState<string | null>(null);
 
   const [phone, setPhone] = useState('+971');
   const [consent, setConsent] = useState(false);
@@ -37,6 +55,38 @@ export default function LoginPage() {
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [resendAvailableAt, setResendAvailableAt] = useState<number | null>(null);
   const [timeLeft, setTimeLeft] = useState<number>(0);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const savedTgPhone = window.localStorage.getItem(STORAGE_KEYS.tgPhone);
+    const savedWaPhone = window.localStorage.getItem(STORAGE_KEYS.waPhone);
+    const savedWaConsent = window.localStorage.getItem(STORAGE_KEYS.waConsent);
+
+    if (savedTgPhone) {
+      setTgPhone(savedTgPhone);
+    }
+    if (savedWaPhone) {
+      setPhone(savedWaPhone);
+    }
+    if (savedWaConsent) {
+      setConsent(savedWaConsent === 'true');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(STORAGE_KEYS.tgPhone, tgPhone);
+  }, [tgPhone]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(STORAGE_KEYS.waPhone, phone);
+  }, [phone]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(STORAGE_KEYS.waConsent, String(consent));
+  }, [consent]);
 
   useEffect(() => {
     if (!expiresAt) {
@@ -54,52 +104,147 @@ export default function LoginPage() {
     return () => clearInterval(interval);
   }, [expiresAt]);
 
-  const formatTimeLeft = () => {
+  useEffect(() => {
+    if (!tgExpiresAt) {
+      setTgTimeLeft(0);
+      return;
+    }
+
+    const tick = () => {
+      const diff = Math.max(0, tgExpiresAt - Date.now());
+      setTgTimeLeft(diff);
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [tgExpiresAt]);
+
+  useEffect(() => {
+    if (!tgSessionId) return;
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/auth/status?session_id=${tgSessionId}`);
+        if (!response.ok) return;
+        const data = (await response.json()) as { state: string; phone?: string };
+        if (data.phone) {
+          setTgPhone((prev) => (prev && prev !== '+971' ? prev : data.phone));
+          setTgStatusHint('Мы получили ваш номер. Введите код из Telegram.');
+        }
+        if (data.state === 'expired') {
+          setTgError('Сессия истекла. Запросите код заново.');
+          resetTelegramFlow();
+        }
+      } catch (error) {
+        console.error('Polling telegram status error', error);
+      }
+    }, TELEGRAM_POLL_INTERVAL);
+
+    return () => clearInterval(interval);
+  }, [tgSessionId]);
+
+  const formatWaTimeLeft = () => {
     const totalSeconds = Math.floor(timeLeft / 1000);
     const minutes = String(Math.floor(totalSeconds / 60)).padStart(1, '0');
     const seconds = String(totalSeconds % 60).padStart(2, '0');
     return `${minutes}:${seconds}`;
   };
 
-  const handleTelegramAuth = useCallback(
-    async (payload: Record<string, unknown>) => {
-      setTgLoading(true);
-      setTgError(null);
-      try {
-        const normalizedPhone = tgPhone ? formatPhone(tgPhone) : null;
-        if (tgPhone && !normalizedPhone) {
-          setTgError('Укажите корректный номер телефона в формате +XXXXXXXXXXX.');
-          return;
-        }
+  const formatTgTimeLeft = () => {
+    const totalSeconds = Math.floor(tgTimeLeft / 1000);
+    const minutes = String(Math.floor(totalSeconds / 60)).padStart(1, '0');
+    const seconds = String(totalSeconds % 60).padStart(2, '0');
+    return `${minutes}:${seconds}`;
+  };
 
-        const response = await fetch('/api/auth/tg-login', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(
-            normalizedPhone
-              ? { ...payload, phone: normalizedPhone }
-              : payload,
-          ),
-        });
-
-        if (!response.ok) {
-          const data = (await response.json().catch(() => ({}))) as ErrorResponse;
-          setTgError(mapErrorCode(data.error));
-          return;
-        }
-
-        router.push(clientConfig.appUrl);
-      } catch (error) {
-        console.error('Telegram login error', error);
-        setTgError('Не удалось выполнить вход. Попробуйте ещё раз.');
-      } finally {
-        setTgLoading(false);
+  const requestTelegramOtp = async () => {
+    if (tgLoading) return;
+    setTgError(null);
+    let normalizedPhone: string | undefined;
+    if (tgPhone) {
+      const formatted = formatPhone(tgPhone);
+      if (!formatted) {
+        setTgError('Укажите корректный номер телефона в формате +XXXXXXXXXXX.');
+        return;
       }
-    },
-    [router, tgPhone],
-  );
+      normalizedPhone = formatted;
+    }
+
+    try {
+      setTgLoading(true);
+      const response = await fetch('/api/auth/tg-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: normalizedPhone }),
+      });
+
+      const data = (await response.json().catch(() => ({}))) as
+        | { session_id: string; bot_link: string; expires_in: number }
+        | ErrorResponse;
+
+      if (!response.ok || 'error' in data) {
+        setTgError(mapErrorCode((data as ErrorResponse).error));
+        return;
+      }
+
+      setTgSessionId(data.session_id);
+      setTgBotLink(data.bot_link);
+      setTgStep('verify');
+      setTgOtp('');
+      setTgStatusHint('Откройте Telegram-бота и поделитесь номером, чтобы получить код.');
+      setTgExpiresAt(Date.now() + data.expires_in * 1000);
+      window.open(data.bot_link, '_blank', 'noopener');
+    } catch (error) {
+      console.error('Telegram request error', error);
+      setTgError('Не удалось подготовить ссылку. Попробуйте ещё раз.');
+    } finally {
+      setTgLoading(false);
+    }
+  };
+
+  const submitTelegramOtp = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (tgLoading || !tgSessionId) return;
+    setTgError(null);
+
+    if (tgOtp.length !== 6) {
+      setTgError('Введите 6-значный код из Telegram.');
+      return;
+    }
+
+    const formattedPhone = tgPhone ? formatPhone(tgPhone) : undefined;
+
+    try {
+      setTgLoading(true);
+      const payload: Record<string, unknown> = {
+        session_id: tgSessionId,
+        otp: tgOtp,
+        channel: 'tg-otp',
+      };
+      if (formattedPhone) {
+        payload.phone = formattedPhone;
+      }
+
+      const response = await fetch('/api/auth/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = (await response.json().catch(() => ({}))) as ErrorResponse;
+      if (!response.ok) {
+        setTgError(mapErrorCode(data.error));
+        return;
+      }
+
+      router.push(clientConfig.appUrl);
+    } catch (error) {
+      console.error('Telegram verify error', error);
+      setTgError('Не удалось подтвердить код. Попробуйте ещё раз.');
+    } finally {
+      setTgLoading(false);
+    }
+  };
 
   const submitPhone = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -186,7 +331,7 @@ export default function LoginPage() {
     }
   };
 
-  const resendOtp = async () => {
+  const resendOtp = () => {
     if (resendAvailableAt && Date.now() < resendAvailableAt) return;
     setWaStep('request');
     setSessionId(null);
@@ -194,27 +339,14 @@ export default function LoginPage() {
     setOtp('');
   };
 
-  const onPhoneChange = (value: string) => {
-    const sanitized = value.replace(/[^\d+]/g, '');
-    if (!sanitized.startsWith('+')) {
-      setPhone(`+${sanitized.replace(/\+/g, '')}`);
-    } else {
-      setPhone(`+${sanitized.slice(1).replace(/\+/g, '')}`);
-    }
-  };
-
-  const onOtpChange = (value: string) => {
-    const onlyDigits = value.replace(/\D/g, '').slice(0, 6);
-    setOtp(onlyDigits);
-  };
-
-  const onTgPhoneChange = (value: string) => {
-    const sanitized = value.replace(/[^\d+]/g, '');
-    if (!sanitized.startsWith('+')) {
-      setTgPhone(`+${sanitized.replace(/\+/g, '')}`);
-    } else {
-      setTgPhone(`+${sanitized.slice(1).replace(/\+/g, '')}`);
-    }
+  const resetTelegramFlow = () => {
+    setTgStep('intro');
+    setTgSessionId(null);
+    setTgBotLink(null);
+    setTgOtp('');
+    setTgExpiresAt(null);
+    setTgTimeLeft(0);
+    setTgStatusHint(null);
   };
 
   return (
@@ -256,45 +388,107 @@ export default function LoginPage() {
 
         <div className="mt-10">
           {activeTab === 'tg' && (
-            <section aria-live="polite" className="space-y-4">
+            <section aria-live="polite" className="space-y-6">
               <h2 className="text-lg font-medium text-slate-900">
-                Войти через Telegram
+                Получить код через Telegram-бота
               </h2>
               <p className="text-sm text-slate-500">
-                Мы не запрашиваем ваш номер телефона. Telegram подтверждает вашу личность
-                автоматически.
+                Мы отправим OTP в официальном боте. Поделитесь номером телефона в Telegram — код появится в чате, затем введите его на сайте.
               </p>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700">
-                    Номер телефона (по желанию)
-                  </label>
-                  <input
-                    type="tel"
-                    value={tgPhone}
-                    onChange={(event) => onTgPhoneChange(event.target.value)}
-                    placeholder="+9715XXXXXXXX"
-                    className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-3 text-base shadow-sm focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/20"
-                  />
-                  <p className="mt-1 text-xs text-slate-400">
-                    Укажите номер, чтобы мы могли связаться с вами позже. Поле необязательное.
-                  </p>
-                </div>
-                {clientConfig.telegramBotName ? (
-                  <TelegramLoginButton
-                    botName={clientConfig.telegramBotName}
-                    onAuth={handleTelegramAuth}
+
+              {tgStep === 'intro' && (
+                <div className="space-y-5 rounded-xl border border-slate-200 bg-slate-50 p-6">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700">
+                      Номер телефона (по желанию)
+                    </label>
+                    <input
+                      type="tel"
+                      value={tgPhone}
+                      onChange={(event) => setTgPhone(sanitizePhoneInput(event.target.value))}
+                      placeholder="+9715XXXXXXXX"
+                      className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-3 text-base shadow-sm focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/20"
+                    />
+                    <p className="mt-1 text-xs text-slate-400">
+                      Номер запоминается только в вашем браузере. Телеграм всё равно попросит подтвердить его при переходе к боту.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="w-full rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                    onClick={requestTelegramOtp}
                     disabled={tgLoading}
-                  />
-                ) : (
-                  <p className="text-sm text-amber-600">
-                    Укажите переменную NEXT_PUBLIC_TG_BOT_NAME, чтобы отобразить виджет входа.
-                  </p>
-                )}
-              </div>
-              {tgLoading && (
-                <p className="text-sm text-slate-500">Проверяем данные Telegram...</p>
+                  >
+                    {tgLoading ? 'Готовим ссылку...' : 'Открыть Telegram-бота'}
+                  </button>
+                  <div className="rounded-lg bg-white/70 p-4 text-sm text-slate-600">
+                    <p className="font-medium text-slate-700">Что произойдёт дальше:</p>
+                    <ol className="mt-2 list-decimal space-y-1 pl-4">
+                      <li>Откроется бот OTPA UTO в Telegram.</li>
+                      <li>Нажмите «Поделиться номером» или отправьте номер вручную.</li>
+                      <li>Получите шестизначный код в чате и введите его здесь.</li>
+                    </ol>
+                  </div>
+                </div>
               )}
+
+              {tgStep === 'verify' && (
+                <div className="space-y-5 rounded-xl border border-slate-200 bg-slate-50 p-6">
+                  <div className="space-y-3 rounded-lg border border-sky-100 bg-white p-4 text-sm text-slate-600">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span>Код отправлен в Telegram-бот.</span>
+                      {tgBotLink && (
+                        <button
+                          type="button"
+                          className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200"
+                          onClick={() => window.open(tgBotLink, '_blank', 'noopener')}
+                        >
+                          Открыть бота ещё раз
+                        </button>
+                      )}
+                    </div>
+                    <p>Сессия истекает через: <span className="font-medium text-slate-800">{formatTgTimeLeft()}</span></p>
+                    {tgPhone && (
+                      <p className="text-xs text-slate-500">Текущий номер: {tgPhone}</p>
+                    )}
+                    {tgStatusHint && <p className="text-xs text-slate-500">{tgStatusHint}</p>}
+                  </div>
+                  <form className="space-y-4" onSubmit={submitTelegramOtp}>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700">
+                        Код из Telegram
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={tgOtp}
+                        onChange={(event) => setTgOtp(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                        placeholder="123456"
+                        className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-3 text-center text-2xl tracking-widest shadow-sm focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/20"
+                        required
+                      />
+                    </div>
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={resetTelegramFlow}
+                        className="flex-1 rounded-full border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-100"
+                      >
+                        Запросить заново
+                      </button>
+                      <button
+                        type="submit"
+                        className="flex-1 rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                        disabled={tgLoading}
+                      >
+                        {tgLoading ? 'Проверяем...' : 'Подтвердить'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
               {tgError && <p className="text-sm text-rose-600">{tgError}</p>}
             </section>
           )}
@@ -317,7 +511,7 @@ export default function LoginPage() {
                     <input
                       type="tel"
                       value={phone}
-                      onChange={(event) => onPhoneChange(event.target.value)}
+                      onChange={(event) => setPhone(sanitizePhoneInput(event.target.value))}
                       placeholder="+9715XXXXXXXX"
                       className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-3 text-base shadow-sm focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/20"
                       required
@@ -359,14 +553,14 @@ export default function LoginPage() {
                       inputMode="numeric"
                       pattern="[0-9]*"
                       value={otp}
-                      onChange={(event) => onOtpChange(event.target.value)}
+                      onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))}
                       placeholder="123456"
                       className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-3 text-center text-2xl tracking-widest shadow-sm focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/20"
                       required
                     />
                   </div>
                   <div className="flex items-center justify-between text-sm text-slate-500">
-                    <span>Таймер: {formatTimeLeft()}</span>
+                    <span>Таймер: {formatWaTimeLeft()}</span>
                     <button
                       type="button"
                       onClick={resendOtp}
@@ -379,7 +573,11 @@ export default function LoginPage() {
                   <div className="flex gap-3">
                     <button
                       type="button"
-                      onClick={() => resendOtp()}
+                      onClick={() => {
+                        setWaStep('request');
+                        setSessionId(null);
+                        setExpiresAt(null);
+                      }}
                       className="flex-1 rounded-full border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={waLoading}
                     >
@@ -413,6 +611,14 @@ function formatPhone(input: string): string | null {
   return sanitized;
 }
 
+function sanitizePhoneInput(value: string) {
+  const digits = value.replace(/[^\d+]/g, '');
+  if (!digits.startsWith('+')) {
+    return `+${digits.replace(/\+/g, '')}`;
+  }
+  return `+${digits.slice(1).replace(/\+/g, '')}`;
+}
+
 function mapErrorCode(code?: string) {
   switch (code) {
     case 'invalid_signature':
@@ -431,6 +637,8 @@ function mapErrorCode(code?: string) {
       return 'Неверный код. Проверьте и попробуйте снова.';
     case 'not_found':
       return 'Сессия не найдена или уже подтверждена.';
+    case 'not_ready':
+      return 'Код ещё не готов. Убедитесь, что поделились номером в Telegram.';
     default:
       return 'Произошла ошибка. Попробуйте ещё раз.';
   }
