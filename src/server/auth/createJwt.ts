@@ -13,10 +13,11 @@ export async function createJwt(
 ): Promise<string> {
   const config = getConfig();
   const secret: Secret = config.JWT_SECRET;
+  const ttlSeconds = parseJwtTtl(config.JWT_TTL ?? '7d');
   const signOptions: SignOptions = {
     issuer: config.API_URL ?? 'auth-service',
     audience: config.APP_URL ?? 'app',
-    expiresIn: config.JWT_TTL ?? '7d',
+    expiresIn: ttlSeconds,
   };
 
   const token = jwt.sign(payload, secret, signOptions);
@@ -27,7 +28,7 @@ export async function createJwt(
       httpOnly: true,
       sameSite: 'lax',
       secure: config.NODE_ENV === 'production',
-      maxAge: parseJwtTtl(config.JWT_TTL ?? '7d'),
+      maxAge: ttlSeconds,
       path: '/',
     });
   }
