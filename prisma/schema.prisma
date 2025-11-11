@@ -1,0 +1,52 @@
+// Prisma schema для Telegram/WhatsApp авторизации
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String    @id @default(cuid())
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  telegramUserId String?   @unique
+  waPhone        String?   @unique
+  name           String?
+  username       String?
+  sessions       AuthSession[]
+  loginEvents    LoginEvent[]
+}
+
+model AuthSession {
+  id        String    @id @default(cuid())
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  channel   String
+  phone     String?
+  tokenHash String?
+  state     String
+  attempts  Int       @default(0)
+  userId    String?
+  user      User?     @relation(fields: [userId], references: [id])
+}
+
+model LoginEvent {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  userId    String?
+  channel   String
+  ip        String?
+  userAgent String?
+  user      User?    @relation(fields: [userId], references: [id])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  channel   String
+  event     String
+  details   Json?
+}
