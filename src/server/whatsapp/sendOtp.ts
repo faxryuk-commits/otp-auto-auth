@@ -73,7 +73,7 @@ export async function sendOtp(phone: string, otp: string): Promise<SendOtpResult
   }
 }
 
-async function logAudit(channel: string, event: string, details: Prisma.JsonValue) {
+async function logAudit(channel: string, event: string, details: Prisma.InputJsonValue) {
   try {
     await prisma.auditLog.create({
       data: {
