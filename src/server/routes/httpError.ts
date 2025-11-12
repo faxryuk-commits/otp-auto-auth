@@ -8,10 +8,3 @@ export class HttpError extends Error {
     this.code = code;
   }
 }
-
-export function toJsonResponse(error: HttpError) {
-  return {
-    status: error.status,
-    body: { error: error.code },
-  };
-}

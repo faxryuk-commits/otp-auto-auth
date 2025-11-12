@@ -14,9 +14,7 @@ export async function sendOtp(phone: string, otp: string): Promise<SendOtpResult
     throw new Error('WhatsApp Cloud API не настроен');
   }
 
-  const url = new URL(
-    `https://graph.facebook.com/v20.0/${config.WA_PHONE_NUMBER_ID}/messages`,
-  );
+  const url = new URL(`https://graph.facebook.com/v20.0/${config.WA_PHONE_NUMBER_ID}/messages`);
 
   const payload = {
     messaging_product: 'whatsapp',
@@ -73,7 +71,7 @@ export async function sendOtp(phone: string, otp: string): Promise<SendOtpResult
   }
 }
 
-async function logAudit(channel: string, event: string, details: Prisma.JsonValue) {
+async function logAudit(channel: string, event: string, details: Prisma.InputJsonValue) {
   try {
     await prisma.auditLog.create({
       data: {

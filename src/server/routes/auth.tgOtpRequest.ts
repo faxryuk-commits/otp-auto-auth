@@ -25,8 +25,8 @@ export async function handleTelegramOtpRequest({ body }: TelegramOtpParams) {
   }
 
   const { phone } = parsed.data;
+  const sessionToken = crypto.randomBytes(12).toString('hex');
 
-  const sessionToken = crypto.randomBytes(16).toString('hex');
   const session = await prisma.authSession.create({
     data: {
       channel: 'tg-otp',

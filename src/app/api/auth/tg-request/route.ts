@@ -9,10 +9,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof HttpError) {
-      return NextResponse.json(
-        { error: error.code },
-        { status: error.status },
-      );
+      return NextResponse.json({ error: error.code }, { status: error.status });
     }
     console.error('POST /auth/tg-request error', error);
     return NextResponse.json({ error: 'server_error' }, { status: 500 });
